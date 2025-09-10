@@ -1,0 +1,119 @@
+ #define BLYNK_TEMPLATE_ID "----" //from your blynk tempelate
+#define BLYNK_TEMPLATE_NAME "IoT Based Smart Energy Meter"
+#define BLYNK_PRINT Serial
+
+#include <LiquidCrystal.h>
+#include "EmonLib.h"
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+
+LiquidCrystal lcd(13, 12, 14, 27, 26, 25); //if we want to display on lcd
+EnergyMonitor emon;
+
+#define vCalibration 65.5 //volatage calibration
+#define currCalibration 4.6875 //current calibration
+
+BlynkTimer timer;
+
+char auth[] = "-----"; //authentication number from blynk
+char ssid[] = "-----"; //wifi name
+char pass[] = "-----"; //wifi password
+
+float kWh = 0;
+unsigned long lastmillis = millis();
+
+// Define the relay pin
+const int relay_pin = 23;
+int relay_state = 0;
+#define button_vpin V4
+
+BLYNK_CONNECTED() {
+  Blynk.syncVirtual(button_vpin);
+}
+
+BLYNK_WRITE(button_vpin) {
+  relay_state = param.asInt();
+  digitalWrite(relay_pin, relay_state); // Control the relay
+}
+
+void myTimerEvent() {
+  emon.calcVI(20, 2000);
+  kWh += emon.realPower * (millis() - lastmillis) / 3600000000.0;
+  yield();
+
+  // Force voltage to zero if it is less than 200 volts
+  if (emon.Vrms < 200) {
+    emon.Vrms = 0;
+  }
+
+  // Print values to Serial Monitor
+  Serial.print("Vrms: ");
+  Serial.print(emon.Vrms, 2);
+  Serial.print("V\tIrms: ");
+  Serial.print(emon.Irms, 4);
+  Serial.print("A\tPower: ");
+  Serial.print(emon.realPower, 4);
+  Serial.print("W\tkWh: ");
+  Serial.print(kWh, 5);
+  Serial.print("kWh\tPower Factor: ");
+  Serial.print(emon.powerFactor, 4);
+  Serial.println(" PF");
+
+  // Update LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Vrms:");
+  lcd.print(emon.Vrms, 2);
+  lcd.print("V");
+  lcd.setCursor(0, 1);
+  lcd.print("Irms:");
+  lcd.print(emon.Irms, 4);
+  lcd.print("A");
+ //delay(2500);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Power:");
+  lcd.print(emon.realPower, 4);
+  lcd.print("W");
+  lcd.setCursor(0, 1);
+  lcd.print("PF:");
+  lcd.print(emon.powerFactor, 4);
+  //delay(2500);
+
+  lastmillis = millis();
+
+  // Send data to Blynk
+  Blynk.virtualWrite(V0, emon.Vrms);
+  Blynk.virtualWrite(V1, emon.Irms);
+  Blynk.virtualWrite(V2, emon.realPower);
+  Blynk.virtualWrite(V3, emon.powerFactor);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Blynk.begin(auth, ssid, pass);
+  lcd.begin(16, 2);
+
+  // Initialize the relay pin
+  pinMode(relay_pin, OUTPUT);
+  digitalWrite(relay_pin, LOW);
+
+  // Initialize the energy monitor
+  emon.voltage(35, vCalibration, 1.7); // Voltage: input pin, calibration, phase_shift
+  emon.current(34, currCalibration); // Current: input pin, calibration.
+
+  timer.setInterval(5000L, myTimerEvent);
+  lcd.setCursor(3, 0);
+  lcd.print("IoT Energy");
+  lcd.setCursor(5, 1);
+  lcd.print("Meter");
+  delay(3000);
+  lcd.clear();
+}
+
+void loop() {
+  Blynk.run();
+  timer.run();
+}
